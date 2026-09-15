@@ -1,0 +1,29 @@
+name: Sonar token diagnostic
+on:
+  workflow_dispatch:
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      H: https://sonarqube.us
+    steps:
+      - name: What can this token see
+        run: |
+          set -u
+          if [ -z "${SONAR_TOKEN:-}" ]; then echo "::error::SONAR_TOKEN empty"; exit 1; fi
+          echo "token length: ${#SONAR_TOKEN}"
+          echo "=== authentication/validate ==="
+          curl -s -H "Authorization: Bearer $SONAR_TOKEN" "$H/api/authentication/validate"; echo
+          echo "=== users/current (login/name) ==="
+          curl -s -H "Authorization: Bearer $SONAR_TOKEN" "$H/api/users/current" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('login=',d.get('login'),'name=',d.get('name'),'email=',d.get('email'))" 2>/dev/null || echo "(could not parse)"
+          echo "=== organizations I am a member of ==="
+          curl -s -H "Authorization: Bearer $SONAR_TOKEN" "$H/api/organizations/search?member=true" \
+            | python3 -c "import json,sys;[print(' -',o.get('key'),'|',o.get('name')) for o in json.load(sys.stdin).get('organizations',[])]" 2>/dev/null || echo "(could not parse)"
+          echo "=== can I see org gourabd1ms directly ==="
+          curl -s -H "Authorization: Bearer $SONAR_TOKEN" "$H/api/organizations/search?organizations=gourabd1ms" \
+            | python3 -c "import json,sys;o=json.load(sys.stdin).get('organizations',[]);print('found' if o else 'NOT found', o[0].get('key') if o else '')" 2>/dev/null || echo "(could not parse)"
+          echo "=== existing projects in gourabd1ms ==="
+          curl -s -H "Authorization: Bearer $SONAR_TOKEN" "$H/api/projects/search?organization=gourabd1ms" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('total=',d.get('paging',{}).get('total'));[print('  ',c.get('key')) for c in d.get('components',[])]" 2>/dev/null || echo "(could not parse / not authorized)"
