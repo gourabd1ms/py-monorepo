@@ -12,6 +12,7 @@ jobs:
     steps:
       - name: Try delete variants on the throwaway project
         run: |
+          set +e
           set -u
           echo "::add-mask::$T"
           try() {
