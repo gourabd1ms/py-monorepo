@@ -1,0 +1,85 @@
+name: Sonar admin recreate projects
+on:
+  workflow_dispatch:
+jobs:
+  recreate:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      H: https://sonarqube.us
+      ORG: gourabd1ms
+      A: gourabd1ms_py-monorepo_service_a
+      B: gourabd1ms_py-monorepo_service_b
+    steps:
+      - name: Recreate with SONAR_ADMIN (guarded)
+        run: |
+          set -u
+          echo "::add-mask::$T"
+          if [ -z "${T:-}" ]; then echo "::error::SONAR_ADMIN empty"; exit 1; fi
+          AUTH="Authorization: Bearer $T"
+
+          echo "=== identity ==="
+          curl -s -H "$AUTH" "$H/api/users/current" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('login=',d.get('login'),'| global perms=',d.get('permissions',{}).get('global'))" 2>/dev/null || echo "(no user identity)"
+
+          echo "=== current projects ==="
+          curl -s -H "$AUTH" "$H/api/projects/search?organization=$ORG" \
+            | python3 -c "import json,sys;[print(' ',c['key']) for c in json.load(sys.stdin).get('components',[]) if 'py-monorepo' in c['key']]" 2>/dev/null || true
+
+          # ---- capability pre-check: temp project, two create forms ----
+          TMP="gourabd1ms_py-monorepo_admincheck"
+          FORM=""
+          echo "=== pre-check create WITH organization param ==="
+          hc=$(curl -s -o /tmp/c.json -w "%{http_code}" -X POST -H "$AUTH" "$H/api/projects/create" \
+            --data-urlencode "organization=$ORG" --data-urlencode "project=$TMP" --data-urlencode "name=admincheck")
+          echo "HTTP $hc"; cat /tmp/c.json; echo
+          if [ "$hc" = "200" ] || [ "$hc" = "201" ]; then FORM="with-org"; fi
+
+          if [ -z "$FORM" ]; then
+            echo "=== pre-check create WITHOUT organization param ==="
+            hc=$(curl -s -o /tmp/c.json -w "%{http_code}" -X POST -H "$AUTH" "$H/api/projects/create" \
+              --data-urlencode "project=$TMP" --data-urlencode "name=admincheck")
+            echo "HTTP $hc"; cat /tmp/c.json; echo
+            if [ "$hc" = "200" ] || [ "$hc" = "201" ]; then FORM="no-org"; fi
+          fi
+
+          if [ -z "$FORM" ]; then
+            echo "::error::SONAR_ADMIN cannot create projects (both forms failed). NOT deleting anything - projects left intact."
+            exit 1
+          fi
+          echo "SONAR_ADMIN CAN create (form=$FORM). Cleaning up temp project."
+          if [ "$FORM" = "with-org" ]; then
+            curl -s -o /dev/null -w "delete temp HTTP %{http_code}\n" -X POST -H "$AUTH" "$H/api/projects/delete" --data-urlencode "project=$TMP"
+          else
+            curl -s -o /dev/null -w "delete temp HTTP %{http_code}\n" -X POST -H "$AUTH" "$H/api/projects/delete" --data-urlencode "project=$TMP"
+          fi
+
+          create_one() {
+            KEY="$1"; NAME="${KEY#gourabd1ms_py-monorepo_}"
+            if [ "$FORM" = "with-org" ]; then
+              curl -s -o /tmp/r.json -w "%{http_code}" -X POST -H "$AUTH" "$H/api/projects/create" \
+                --data-urlencode "organization=$ORG" --data-urlencode "project=$KEY" --data-urlencode "name=$NAME"
+            else
+              curl -s -o /tmp/r.json -w "%{http_code}" -X POST -H "$AUTH" "$H/api/projects/create" \
+                --data-urlencode "project=$KEY" --data-urlencode "name=$NAME"
+            fi
+          }
+
+          echo "=== DELETE both projects ==="
+          for K in "$A" "$B"; do
+            dc=$(curl -s -o /tmp/d.json -w "%{http_code}" -X POST -H "$AUTH" "$H/api/projects/delete" --data-urlencode "project=$K")
+            echo "delete $K -> HTTP $dc"; cat /tmp/d.json 2>/dev/null; echo
+          done
+
+          echo "=== RECREATE both projects with SONAR_ADMIN ==="
+          rc=0
+          for K in "$A" "$B"; do
+            hc=$(create_one "$K")
+            echo "create $K -> HTTP $hc"; cat /tmp/r.json; echo
+            [ "$hc" = "200" ] || [ "$hc" = "201" ] || rc=1
+          done
+
+          echo "=== projects after recreate ==="
+          curl -s -H "$AUTH" "$H/api/projects/search?organization=$ORG" \
+            | python3 -c "import json,sys;[print(' ',c['key']) for c in json.load(sys.stdin).get('components',[]) if 'py-monorepo' in c['key']]" 2>/dev/null || true
+          exit $rc
