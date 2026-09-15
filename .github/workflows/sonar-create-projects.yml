@@ -1,0 +1,40 @@
+name: Sonar - create monorepo projects (one-off)
+on:
+  workflow_dispatch:
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    env:
+      CREATE_TOKEN: ${{ vars.SONAR_CREATE_TOKEN }}
+      H: https://sonarqube.us
+      ORG: gourabd1ms
+    steps:
+      - name: Create both Sonar projects
+        run: |
+          set -u
+          # Never let the token surface in logs.
+          echo "::add-mask::$CREATE_TOKEN"
+          if [ -z "${CREATE_TOKEN:-}" ]; then
+            echo "::error::vars.SONAR_CREATE_TOKEN is not set"; exit 1
+          fi
+          rc=0
+          for KEY in gourabd1ms_py-monorepo_service_a gourabd1ms_py-monorepo_service_b; do
+            NAME="${KEY#gourabd1ms_py-monorepo_}"
+            # already there?
+            tot=$(curl -s -H "Authorization: Bearer $CREATE_TOKEN" \
+              "$H/api/projects/search?organization=$ORG&projects=$KEY" \
+              | python3 -c "import json,sys;print(json.load(sys.stdin).get('paging',{}).get('total',0))" 2>/dev/null || echo 0)
+            if [ "$tot" != "0" ]; then echo "$KEY already exists"; continue; fi
+            hc=$(curl -s -o /tmp/c.json -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $CREATE_TOKEN" \
+              "$H/api/projects/create" \
+              --data-urlencode "organization=$ORG" \
+              --data-urlencode "project=$KEY" \
+              --data-urlencode "name=$NAME")
+            echo "create $KEY -> HTTP $hc"; cat /tmp/c.json; echo
+            if [ "$hc" != "200" ] && [ "$hc" != "201" ]; then rc=1; fi
+          done
+          echo "=== projects now in $ORG matching py-monorepo ==="
+          curl -s -H "Authorization: Bearer $CREATE_TOKEN" "$H/api/projects/search?organization=$ORG" \
+            | python3 -c "import json,sys;[print(' ',c['key']) for c in json.load(sys.stdin).get('components',[]) if 'py-monorepo' in c['key']]" 2>/dev/null || true
+          exit $rc
