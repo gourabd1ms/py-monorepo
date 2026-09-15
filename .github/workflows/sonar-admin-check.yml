@@ -1,0 +1,35 @@
+name: Sonar admin token check
+on:
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      H: https://sonarqube.us
+      ORG: gourabd1ms
+    steps:
+      - name: Probe SONAR_ADMIN capabilities
+        run: |
+          set -u
+          if [ -z "${T:-}" ]; then echo "::error::SONAR_ADMIN empty"; exit 1; fi
+          echo "token length: ${#T}"
+          echo "=== validate ==="
+          curl -s -H "Authorization: Bearer $T" "$H/api/authentication/validate"; echo
+          echo "=== users/current (is it a user token?) ==="
+          curl -s -H "Authorization: Bearer $T" "$H/api/users/current" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('login=',d.get('login'),'| name=',d.get('name'),'| permissions.global=',d.get('permissions',{}).get('global'))" 2>/dev/null || echo "(no user identity -> analysis token)"
+          echo "=== create-permission test (temp project) ==="
+          TMP="gourabd1ms_py-monorepo_admincheck"
+          hc=$(curl -s -o /tmp/c.json -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
+            "$H/api/projects/create" --data-urlencode "organization=$ORG" \
+            --data-urlencode "project=$TMP" --data-urlencode "name=admincheck")
+          echo "create -> HTTP $hc"; cat /tmp/c.json; echo
+          if [ "$hc" = "200" ] || [ "$hc" = "201" ]; then
+            echo "CREATE OK -> this token CAN create projects. Cleaning up temp project."
+            dc=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
+              "$H/api/projects/delete" --data-urlencode "project=$TMP")
+            echo "delete temp -> HTTP $dc"
+          else
+            echo "::warning::SONAR_ADMIN cannot create projects (HTTP $hc)."
+          fi
