@@ -1,0 +1,36 @@
+name: Sonar delete variant test
+on:
+  workflow_dispatch:
+jobs:
+  dtest:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      H: https://sonarqube.us
+      ORG: gourabd1ms
+      TMP: gourabd1ms_py-monorepo_admincheck
+    steps:
+      - name: Try delete variants on the throwaway project
+        run: |
+          set -u
+          echo "::add-mask::$T"
+          try() {
+            desc="$1"; shift
+            code=$(curl -s -o /tmp/o.json -w "%{http_code}" "$@")
+            echo "[$desc] -> HTTP $code"; head -c 200 /tmp/o.json; echo
+            # if the project is gone now, report success
+            tot=$(curl -s -H "Authorization: Bearer $T" "$H/api/projects/search?organization=$ORG&projects=$TMP" \
+              | python3 -c "import json,sys;print(json.load(sys.stdin).get('paging',{}).get('total',0))" 2>/dev/null || echo "?")
+            echo "    remaining $TMP: $tot"
+            [ "$tot" = "0" ] && echo "    >>> SUCCESS with: $desc" && exit 0
+          }
+          echo "ensure temp exists (create if needed)"
+          curl -s -o /dev/null -w "create temp HTTP %{http_code}\n" -X POST -H "Authorization: Bearer $T" \
+            "$H/api/projects/create" --data-urlencode "organization=$ORG" --data-urlencode "project=$TMP" --data-urlencode "name=admincheck"
+
+          try "Bearer, project only"        -X POST -H "Authorization: Bearer $T" "$H/api/projects/delete" --data-urlencode "project=$TMP"
+          try "Bearer, project+organization" -X POST -H "Authorization: Bearer $T" "$H/api/projects/delete" --data-urlencode "organization=$ORG" --data-urlencode "project=$TMP"
+          try "Basic(-u T:), project only"   -X POST -u "$T:" "$H/api/projects/delete" --data-urlencode "project=$TMP"
+          try "Basic(-u T:), project+org"    -X POST -u "$T:" "$H/api/projects/delete" --data-urlencode "organization=$ORG" --data-urlencode "project=$TMP"
+          echo "::warning::No delete variant worked with SONAR_ADMIN; the token lacks project-administer/delete permission."
+          exit 1
