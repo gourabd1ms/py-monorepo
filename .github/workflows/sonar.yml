@@ -56,9 +56,9 @@ jobs:
               --data-urlencode "organization=gourabd1ms" \
               --data-urlencode "project=$KEY" \
               --data-urlencode "name=$KEY")
-            echo "create HTTP $hc"; cat /tmp/crt.json
+            echo "create HTTP $hc"; cat /tmp/crt.json; echo
             if [ "$hc" != "200" ] && [ "$hc" != "201" ]; then
-              echo "Failed to create Sonar project $KEY"; exit 1
+              echo "::warning::Could not create $KEY via API (HTTP $hc). This is expected for an analysis-scoped token. The scan step will still run; the project must either be auto-provisioned by the org or pre-created via the SonarQube Cloud monorepo import."
             fi
           fi
 
