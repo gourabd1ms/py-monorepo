@@ -1,0 +1,40 @@
+name: Sonar SOT base discovery
+on:
+  workflow_dispatch:
+jobs:
+  base:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+    steps:
+      - name: Get swagger servers
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          for U in \
+            "https://api.swaggerhub.com/apis/SonarSource/PUBLIC-ExternalAuthentication/0.0/swagger.json?format=json" \
+            "https://api.swaggerhub.com/apis/SonarSource/PUBLIC-ExternalAuthentication/0.0" \
+            "https://app.swaggerhub.com/apiproxy/registry/SonarSource/PUBLIC-ExternalAuthentication/0.0" ; do
+            c=$(curl -s -o s.json -w "%{http_code}" -L --max-time 30 -H "Accept: application/json" "$U")
+            echo "spec $U -> $c"
+            if [ "$c" = "200" ]; then
+              echo "  servers:"; jq -r '.servers[]?.url' s.json 2>/dev/null
+              echo "  paths (token/role):"; jq -r '.paths|keys[]' s.json 2>/dev/null | grep -iE "token|role|resource-link"
+              echo "  create request schema:"
+              jq -r '.paths | to_entries[] | select(.key|test("token-definitions$")) | .value.post.requestBody.content["application/json"].schema' s.json 2>/dev/null | head -40
+              break
+            fi
+          done
+      - name: Probe token-definitions across candidate bases (GET, read-only)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          for B in \
+            "https://sonarqube.us/api/v2" \
+            "https://api.sonarqube.us/v2" \
+            "https://api.sonarqube.us" \
+            "https://sonarcloud.io/api/v2" ; do
+            code=$(curl -s -o p.json -w "%{http_code}" -H "Authorization: Bearer $T" "$B/authentication/token-definitions")
+            printf "%-40s -> %s  " "$B/authentication/token-definitions" "$code"
+            head -c 140 p.json | tr -d '\n'; echo
+          done
