@@ -1,0 +1,26 @@
+name: Sonar project uuid probe
+on:
+  workflow_dispatch:
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      A: https://api.sonarqube.us
+      ORG_UUID: 705a240f-23f9-4524-86cf-f50f6ccac3a8
+    steps:
+      - name: Find project UUIDs (read-only)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          AUTH="Authorization: Bearer $T"
+          for u in \
+            "$A/projects/projects?organizationId=$ORG_UUID" \
+            "$A/projects/projects?organizationId=$ORG_UUID&query=service" \
+            "$A/projects/projects?organizationKey=gourabd1ms" ; do
+            code=$(curl -s -o p.json -w "%{http_code}" -H "$AUTH" "$u")
+            echo "==== ${u#$A} -> $code"
+            head -c 900 p.json; echo
+          done
+          echo "--- service_a / service_b uuids ---"
+          jq -r '(if type=="array" then .[] else (.projects // .items // .)[]? end) | select(.key|test("py-monorepo_service")) | "\(.key)  id=\(.id)  uuidV4=\(.uuidV4)"' p.json 2>/dev/null
