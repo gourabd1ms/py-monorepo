@@ -1,0 +1,14 @@
+name: Sonar SOT docs fetch
+on:
+  workflow_dispatch:
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch the markdown docs and print API details
+        run: |
+          set +e
+          U="https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-organization/scoped-organization-tokens-api-migration.md"
+          curl -sS -L --max-time 40 -o d.md -w "md HTTP %{http_code} bytes=%{size_download}\n" "$U"
+          echo "=================== FULL MARKDOWN ==================="
+          cat d.md
