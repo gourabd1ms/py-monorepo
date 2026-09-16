@@ -1,0 +1,64 @@
+name: Sonar SOT API explore
+on:
+  workflow_dispatch:
+    inputs:
+      docs_url:
+        default: "https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-organization/scoped-organization-tokens-api-migration"
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      H: https://sonarqube.us
+      ORG: gourabd1ms
+      DOCS: ${{ inputs.docs_url }}
+    steps:
+      - name: Read docs for endpoint hints
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          echo "=== fetch docs (runner is not behind the corp proxy) ==="
+          curl -sS -L --max-time 40 -o docs.html -w "docs HTTP %{http_code}\n" "$DOCS"
+          echo "--- api paths / scoped-token mentions in docs HTML ---"
+          grep -oE "/api/v2/[a-zA-Z0-9/_-]+|scoped[- ]?tokens?|/api/[a-zA-Z0-9/_-]*token[a-zA-Z0-9/_-]*" docs.html | sort -u | head -40
+          echo "--- any JSON/next-data blobs mentioning scoped ---"
+          grep -oE "\"[^\"]*scoped[^\"]*\"" docs.html | sort -u | head -20
+
+      - name: Resolve org UUID (needed by v2)
+        run: |
+          set +e
+          echo "=== v1 organizations/search ==="
+          curl -s -H "Authorization: Bearer $T" "$H/api/organizations/search?organizations=$ORG" | head -c 600; echo
+          echo "=== v2 organizations search variants ==="
+          for u in "$H/api/v2/organizations" "$H/api/v2/organizations?organizationKey=$ORG" "$H/api/v2/organizations/search?key=$ORG"; do
+            code=$(curl -s -o /tmp/o.json -w "%{http_code}" -H "Authorization: Bearer $T" "$u")
+            echo "$u -> $code"; [ "$code" = "200" ] && head -c 300 /tmp/o.json && echo
+          done
+
+      - name: Probe SOT (scoped-token) endpoints (GET, read-only)
+        run: |
+          set +e
+          probe() {
+            code=$(curl -s -o /tmp/p.json -w "%{http_code}" -H "Authorization: Bearer $T" "$1")
+            printf "%-70s -> %s\n" "$1" "$code"
+            case "$code" in 200|201|400|405|422) echo "    $(head -c 200 /tmp/p.json)";; esac
+          }
+          for u in \
+            "$H/api/v2/authorizations/scoped-tokens" \
+            "$H/api/v2/authorizations/scoped-tokens?organizationId=$ORG" \
+            "$H/api/v2/organizations/$ORG/scoped-tokens" \
+            "$H/api/v2/scoped-tokens" \
+            "$H/api/v2/organizations-tokens" \
+            "$H/api/v2/authorizations/organization-tokens" \
+            "$H/api/v2/users-management/scoped-tokens" \
+            "$H/api/v2/authorizations/tokens" ; do
+            probe "$u"
+          done
+          echo "=== also dump the v2 openapi if present ==="
+          for u in "$H/api/v2/api-docs" "$H/api/v2/openapi.json" "$H/api/v2/swagger.json"; do
+            code=$(curl -s -o /tmp/api.json -w "%{http_code}" -H "Authorization: Bearer $T" "$u")
+            echo "$u -> $code"
+            if [ "$code" = "200" ]; then
+              python3 -c "import json;d=json.load(open('/tmp/api.json'));[print(' ',p) for p in d.get('paths',{}) if 'token' in p.lower() or 'scoped' in p.lower()]" 2>/dev/null
+            fi
+          done
