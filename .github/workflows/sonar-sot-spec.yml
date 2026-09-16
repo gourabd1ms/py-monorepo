@@ -1,0 +1,29 @@
+name: Sonar SOT swagger spec
+on:
+  workflow_dispatch:
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch external-auth swagger and print servers + token paths
+        run: |
+          set +e
+          U="https://api.swaggerhub.com/apis/SonarSource/PUBLIC-ExternalAuthentication/0.0/swagger.json"
+          curl -sS -L --max-time 40 -o spec.json -w "spec HTTP %{http_code} bytes=%{size_download}\n" "$U"
+          echo "=== servers ==="
+          jq -r '.servers[]?.url' spec.json
+          echo "=== basePath / host (swagger2) ==="
+          jq -r '.host // empty, .basePath // empty' spec.json
+          echo "=== all paths ==="
+          jq -r '.paths | keys[]' spec.json
+          echo "=== POST token-definitions request schema ==="
+          jq -r '.paths | to_entries[] | select(.key|test("token-definition")) | .key as $k | .value | to_entries[] | "\($k) [\(.key)]"' spec.json
+          echo "=== create body properties (resolve schema) ==="
+          jq -r '
+            (.paths | to_entries[] | select(.key|test("token-definition")) | .value.post) as $p
+            | ($p.requestBody.content["application/json"].schema."$ref" // "") as $ref
+            | $ref' spec.json
+          # dump the TokenDefinition-ish component schemas
+          jq -r '.components.schemas | keys[]' spec.json 2>/dev/null | grep -iE "token|role" | head
+          echo "=== role enum(s) if any ==="
+          jq -r '.. | objects | select(has("enum")) | .enum | @json' spec.json 2>/dev/null | sort -u | head
