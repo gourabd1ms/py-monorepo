@@ -1,0 +1,32 @@
+name: Sonar SOT org+detail
+on:
+  workflow_dispatch:
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      A: https://api.sonarqube.us
+    steps:
+      - name: Full 400 body + find org UUID + list methods (read-only)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          AUTH="Authorization: Bearer $T"
+          echo "=== GET /authentication/token-definitions (full body) ==="
+          curl -s -H "$AUTH" "$A/authentication/token-definitions" | head -c 1200; echo; echo
+          echo "=== try with organizationId placeholder to see required-params error ==="
+          curl -s -H "$AUTH" "$A/authentication/token-definitions?pageSize=10" | head -c 600; echo; echo
+          echo "=== hunt for organizations endpoint / org UUID ==="
+          for u in \
+            "$A/organizations" \
+            "$A/organizations?organizationKey=gourabd1ms" \
+            "$A/organizations-external" \
+            "$A/organizations/search?organizationKey=gourabd1ms" \
+            "$A/authorizations/organizations" ; do
+            code=$(curl -s -o o.json -w "%{http_code}" -H "$AUTH" "$u")
+            printf "%-55s -> %s  " "${u#$A}" "$code"
+            head -c 200 o.json | tr -d '\n'; echo
+          done
+          echo "=== grep any UUID that looks like an org id ==="
+          cat o.json 2>/dev/null | grep -oE '"id":"[0-9a-fA-F-]{36}"' | head
