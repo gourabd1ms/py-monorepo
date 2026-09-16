@@ -1,0 +1,94 @@
+name: Sonar SOT create + associate projects
+
+# Creates one project-scoped SOT (browse / administer projects / execute
+# analysis), associates it with c.demo and java.demo, then updates it to also
+# cover perl.demo. Split into readable steps.
+#
+# Role mapping: browse=user, administer projects=admin, execute analysis=scan.
+# Caller (SONAR_ADMIN) must hold org admin to create tokens.
+
+on:
+  workflow_dispatch:
+    inputs:
+      token_name:
+        description: "Name for the new scoped org token"
+        default: "multiproj-browse-admin-scan"
+
+env:
+  A: https://api.sonarqube.us
+  ORG_UUID: 705a240f-23f9-4524-86cf-f50f6ccac3a8
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      NAME: ${{ inputs.token_name }}
+    steps:
+      - name: 1. Create the scoped org token (project roles browse/administer/analysis)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          BODY='{"name":"'"$NAME"'","organizationId":"'"$ORG_UUID"'","roleAssignments":[{"resourceType":"project","roles":["user","admin","scan"]}],"autoGrantProjectPermissions":false}'
+          code=$(curl -s -o t.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+            -d "$BODY" "$A/authentication/token-definitions")
+          echo "POST token-definitions -> HTTP $code"
+          jq -r '"created id=\(.id) name=\(.name) roles=\(.roleAssignments)"' t.json 2>/dev/null || head -c 300 t.json
+          TID=$(jq -r '.id // empty' t.json 2>/dev/null)
+          if [ -z "$TID" ]; then echo "::error::token not created"; exit 1; fi
+          echo "TOKEN_ID=$TID" >> "$GITHUB_ENV"
+          echo "NOTE: token value is in t.json (.token). Add 'jq -r .token t.json' to reveal it."
+
+      - name: 2. Resolve project UUIDs (c.demo, java.demo, perl.demo)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          curl -s -H "Authorization: Bearer $T" \
+            "$A/projects/projects?organizationIds=$ORG_UUID&pageSize=500" -o all.json
+          for pair in C:gourabd1ms_c.demo JAVA:gourabd1ms_java.demo PERL:gourabd1ms_perl.demo; do
+            var="${pair%%:*}"; key="${pair#*:}"
+            uuid=$(jq -r --arg k "$key" '.projects[] | select(.key==$k) | .id' all.json 2>/dev/null | head -1)
+            echo "$key -> ${uuid:-<not found>}"
+            echo "${var}_UUID=$uuid" >> "$GITHUB_ENV"
+          done
+
+      - name: 3. Associate project c.demo
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          if [ -z "${C_UUID:-}" ]; then echo "::error::c.demo UUID missing"; exit 1; fi
+          body='{"organizationTokenId":"'"$TOKEN_ID"'","resourceType":"project","resourceId":"'"$C_UUID"'"}'
+          code=$(curl -s -o l.json -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
+            -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
+          echo "attach c.demo ($C_UUID) -> HTTP $code"; head -c 200 l.json; echo
+
+      - name: 4. Associate project java.demo
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          if [ -z "${JAVA_UUID:-}" ]; then echo "::error::java.demo UUID missing"; exit 1; fi
+          body='{"organizationTokenId":"'"$TOKEN_ID"'","resourceType":"project","resourceId":"'"$JAVA_UUID"'"}'
+          code=$(curl -s -o l.json -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
+            -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
+          echo "attach java.demo ($JAVA_UUID) -> HTTP $code"; head -c 200 l.json; echo
+
+      - name: 5. Update - also associate project perl.demo
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          if [ -z "${PERL_UUID:-}" ]; then echo "::error::perl.demo UUID missing"; exit 1; fi
+          body='{"organizationTokenId":"'"$TOKEN_ID"'","resourceType":"project","resourceId":"'"$PERL_UUID"'"}'
+          code=$(curl -s -o l.json -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
+            -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
+          echo "attach perl.demo ($PERL_UUID) -> HTTP $code"; head -c 200 l.json; echo
+
+      - name: 6. Verify token role assignments
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          curl -s -H "Authorization: Bearer $T" \
+            "$A/authentication/token-definitions?organizationId=$ORG_UUID" -o defs.json
+          echo "=== our token ($TOKEN_ID) ==="
+          jq -r --arg id "$TOKEN_ID" '(.tokenDefinitions // [])[] | select(.id==$id) | "name=\(.name) roles=\(.roleAssignments)"' defs.json 2>/dev/null || head -c 300 defs.json
+          echo "(project associations are token-resource-links created in steps 3-5)"
