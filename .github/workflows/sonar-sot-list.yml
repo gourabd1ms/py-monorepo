@@ -1,0 +1,22 @@
+name: Sonar SOT list (verify)
+on:
+  workflow_dispatch:
+jobs:
+  l:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      A: https://api.sonarqube.us
+      ORG_UUID: 705a240f-23f9-4524-86cf-f50f6ccac3a8
+    steps:
+      - name: GET token-definitions with real org UUID (read-only)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          code=$(curl -s -o l.json -w "%{http_code}" -H "Authorization: Bearer $T" \
+            "$A/authentication/token-definitions?organizationId=$ORG_UUID")
+          echo "GET /authentication/token-definitions?organizationId=$ORG_UUID -> $code"
+          echo "--- body (token VALUES are never returned by list; only metadata) ---"
+          head -c 1500 l.json; echo
+          echo "--- existing SOT names/roles ---"
+          jq -r '(.tokenDefinitions // .items // .) | if type=="array" then .[] else . end | "name=\(.name) id=\(.id) roles=\(.roleAssignments)"' l.json 2>/dev/null | head
