@@ -1,0 +1,26 @@
+name: Sonar org uuid probe
+on:
+  workflow_dispatch:
+jobs:
+  u:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      W: https://sonarqube.us
+      A: https://api.sonarqube.us
+    steps:
+      - name: Find gourabd1ms org UUID via bearer-accessible routes
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          AUTH="Authorization: Bearer $T"
+          for u in \
+            "$W/api/navigation/organization?organization=gourabd1ms" \
+            "$W/api/organizations/search?organizations=gourabd1ms" \
+            "$A/authentication/organizations" \
+            "$A/authentication/token-definitions?organizationId=gourabd1ms" ; do
+            code=$(curl -s -o o.json -w "%{http_code}" -H "$AUTH" "$u")
+            echo "==== ${u} -> $code"
+            head -c 500 o.json; echo
+            grep -oE '"(id|organizationId|uuid)":"[0-9a-fA-F-]{20,36}"' o.json | head
+          done
