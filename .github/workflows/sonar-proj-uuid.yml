@@ -15,9 +15,9 @@ jobs:
           echo "::add-mask::$T"
           AUTH="Authorization: Bearer $T"
           for u in \
-            "$A/projects/projects?organizationId=$ORG_UUID" \
-            "$A/projects/projects?organizationId=$ORG_UUID&query=service" \
-            "$A/projects/projects?organizationKey=gourabd1ms" ; do
+            "$A/projects/projects?organizationIds=$ORG_UUID" \
+            "$A/projects/projects?organizationIds=$ORG_UUID&query=service" \
+            "$A/projects/projects?organizationIds=$ORG_UUID&pageSize=50" ; do
             code=$(curl -s -o p.json -w "%{http_code}" -H "$AUTH" "$u")
             echo "==== ${u#$A} -> $code"
             head -c 900 p.json; echo
