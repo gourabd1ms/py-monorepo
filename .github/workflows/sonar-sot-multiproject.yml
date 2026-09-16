@@ -2,7 +2,8 @@ name: Sonar SOT create + associate projects
 
 # Creates one project-scoped SOT (browse / administer projects / execute
 # analysis), associates it with c.demo and java.demo, then updates it to also
-# cover perl.demo. Split into readable steps.
+# cover perl.demo. Split into readable steps; each step echoes the exact curl
+# it runs (the bearer token is shown as a placeholder, never the real value).
 #
 # Role mapping: browse=user, administer projects=admin, execute analysis=scan.
 # Caller (SONAR_ADMIN) must hold org admin to create tokens.
@@ -30,10 +31,17 @@ jobs:
           set +e
           echo "::add-mask::$T"
           BODY='{"name":"'"$NAME"'","organizationId":"'"$ORG_UUID"'","roleAssignments":[{"resourceType":"project","roles":["user","admin","scan"]}],"autoGrantProjectPermissions":false}'
+          echo "----- curl -----"
+          echo "curl -X POST \\"
+          echo "  -H 'Authorization: Bearer <SONAR_ADMIN>' \\"
+          echo "  -H 'Content-Type: application/json' \\"
+          echo "  '$A/authentication/token-definitions' \\"
+          echo "  -d '$BODY'"
+          echo "----------------"
           code=$(curl -s -o t.json -w "%{http_code}" -X POST \
             -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
             -d "$BODY" "$A/authentication/token-definitions")
-          echo "POST token-definitions -> HTTP $code"
+          echo "-> HTTP $code"
           jq -r '"created id=\(.id) name=\(.name) roles=\(.roleAssignments)"' t.json 2>/dev/null || head -c 300 t.json
           TID=$(jq -r '.id // empty' t.json 2>/dev/null)
           if [ -z "$TID" ]; then echo "::error::token not created"; exit 1; fi
@@ -44,8 +52,11 @@ jobs:
         run: |
           set +e
           echo "::add-mask::$T"
-          curl -s -H "Authorization: Bearer $T" \
-            "$A/projects/projects?organizationIds=$ORG_UUID&pageSize=500" -o all.json
+          URL="$A/projects/projects?organizationIds=$ORG_UUID&pageSize=500"
+          echo "----- curl -----"
+          echo "curl -H 'Authorization: Bearer <SONAR_ADMIN>' '$URL'"
+          echo "----------------"
+          curl -s -H "Authorization: Bearer $T" "$URL" -o all.json
           for pair in C:gourabd1ms_c.demo JAVA:gourabd1ms_java.demo PERL:gourabd1ms_perl.demo; do
             var="${pair%%:*}"; key="${pair#*:}"
             uuid=$(jq -r --arg k "$key" '.projects[] | select(.key==$k) | .id' all.json 2>/dev/null | head -1)
@@ -59,9 +70,16 @@ jobs:
           echo "::add-mask::$T"
           if [ -z "${C_UUID:-}" ]; then echo "::error::c.demo UUID missing"; exit 1; fi
           body='{"organizationTokenId":"'"$TOKEN_ID"'","resourceType":"project","resourceId":"'"$C_UUID"'"}'
+          echo "----- curl -----"
+          echo "curl -X POST \\"
+          echo "  -H 'Authorization: Bearer <SONAR_ADMIN>' \\"
+          echo "  -H 'Content-Type: application/json' \\"
+          echo "  '$A/authentication/token-resource-links' \\"
+          echo "  -d '$body'"
+          echo "----------------"
           code=$(curl -s -o l.json -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
             -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
-          echo "attach c.demo ($C_UUID) -> HTTP $code"; head -c 200 l.json; echo
+          echo "-> HTTP $code"; head -c 200 l.json; echo
 
       - name: 4. Associate project java.demo
         run: |
@@ -69,9 +87,16 @@ jobs:
           echo "::add-mask::$T"
           if [ -z "${JAVA_UUID:-}" ]; then echo "::error::java.demo UUID missing"; exit 1; fi
           body='{"organizationTokenId":"'"$TOKEN_ID"'","resourceType":"project","resourceId":"'"$JAVA_UUID"'"}'
+          echo "----- curl -----"
+          echo "curl -X POST \\"
+          echo "  -H 'Authorization: Bearer <SONAR_ADMIN>' \\"
+          echo "  -H 'Content-Type: application/json' \\"
+          echo "  '$A/authentication/token-resource-links' \\"
+          echo "  -d '$body'"
+          echo "----------------"
           code=$(curl -s -o l.json -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
             -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
-          echo "attach java.demo ($JAVA_UUID) -> HTTP $code"; head -c 200 l.json; echo
+          echo "-> HTTP $code"; head -c 200 l.json; echo
 
       - name: 5. Update - also associate project perl.demo
         run: |
@@ -79,16 +104,26 @@ jobs:
           echo "::add-mask::$T"
           if [ -z "${PERL_UUID:-}" ]; then echo "::error::perl.demo UUID missing"; exit 1; fi
           body='{"organizationTokenId":"'"$TOKEN_ID"'","resourceType":"project","resourceId":"'"$PERL_UUID"'"}'
+          echo "----- curl -----"
+          echo "curl -X POST \\"
+          echo "  -H 'Authorization: Bearer <SONAR_ADMIN>' \\"
+          echo "  -H 'Content-Type: application/json' \\"
+          echo "  '$A/authentication/token-resource-links' \\"
+          echo "  -d '$body'"
+          echo "----------------"
           code=$(curl -s -o l.json -w "%{http_code}" -X POST -H "Authorization: Bearer $T" \
             -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
-          echo "attach perl.demo ($PERL_UUID) -> HTTP $code"; head -c 200 l.json; echo
+          echo "-> HTTP $code"; head -c 200 l.json; echo
 
       - name: 6. Verify token role assignments
         run: |
           set +e
           echo "::add-mask::$T"
-          curl -s -H "Authorization: Bearer $T" \
-            "$A/authentication/token-definitions?organizationId=$ORG_UUID" -o defs.json
+          URL="$A/authentication/token-definitions?organizationId=$ORG_UUID"
+          echo "----- curl -----"
+          echo "curl -H 'Authorization: Bearer <SONAR_ADMIN>' '$URL'"
+          echo "----------------"
+          curl -s -H "Authorization: Bearer $T" "$URL" -o defs.json
           echo "=== our token ($TOKEN_ID) ==="
           jq -r --arg id "$TOKEN_ID" '(.tokenDefinitions // [])[] | select(.id==$id) | "name=\(.name) roles=\(.roleAssignments)"' defs.json 2>/dev/null || head -c 300 defs.json
-          echo "(project associations are token-resource-links created in steps 3-5)"
+          echo "(project associations are the token-resource-links created in steps 3-5)"
