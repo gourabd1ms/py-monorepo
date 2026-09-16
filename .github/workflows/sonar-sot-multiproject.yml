@@ -1,18 +1,19 @@
 name: Sonar SOT create + associate projects
 
-# Creates one project-scoped SOT (browse / administer projects / execute
-# analysis), associates it with c.demo and java.demo, then updates it to also
-# cover perl.demo. Split into readable steps; each step echoes the exact curl
-# it runs (the bearer token is shown as a placeholder, never the real value).
+# Idempotent: deletes any existing SOT with the same name, then creates one
+# project-scoped SOT (browse / administer projects / execute analysis),
+# associates it with c.demo and java.demo, then updates it to also cover
+# perl.demo. Each step echoes the exact curl it runs (bearer token shown as a
+# placeholder, never the real value).
 #
 # Role mapping: browse=user, administer projects=admin, execute analysis=scan.
-# Caller (SONAR_ADMIN) must hold org admin to create tokens.
+# Caller (SONAR_ADMIN) must hold org admin to create/delete tokens.
 
 on:
   workflow_dispatch:
     inputs:
       token_name:
-        description: "Name for the new scoped org token"
+        description: "Name for the scoped org token"
         default: "multiproj-browse-admin-scan"
 
 env:
@@ -26,7 +27,27 @@ jobs:
       T: ${{ secrets.SONAR_ADMIN }}
       NAME: ${{ inputs.token_name }}
     steps:
-      - name: 1. Create the scoped org token (project roles browse/administer/analysis)
+      - name: 1. Delete any existing token with the same name (idempotency)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          URL="$A/authentication/token-definitions?organizationId=$ORG_UUID"
+          echo "----- curl (list) -----"
+          echo "curl -H 'Authorization: Bearer <SONAR_ADMIN>' '$URL'"
+          echo "-----------------------"
+          curl -s -H "Authorization: Bearer $T" "$URL" -o defs.json
+          IDS=$(jq -r --arg n "$NAME" '(.tokenDefinitions // [])[] | select(.name==$n) | .id' defs.json 2>/dev/null)
+          if [ -z "$IDS" ]; then echo "no existing token named '$NAME' - nothing to delete"; fi
+          for id in $IDS; do
+            echo "----- curl (delete) -----"
+            echo "curl -X DELETE -H 'Authorization: Bearer <SONAR_ADMIN>' '$A/authentication/token-definitions/$id'"
+            echo "-------------------------"
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+              -H "Authorization: Bearer $T" "$A/authentication/token-definitions/$id")
+            echo "deleted $id -> HTTP $code"
+          done
+
+      - name: 2. Create the scoped org token (project roles browse/administer/analysis)
         run: |
           set +e
           echo "::add-mask::$T"
@@ -48,7 +69,7 @@ jobs:
           echo "TOKEN_ID=$TID" >> "$GITHUB_ENV"
           echo "NOTE: token value is in t.json (.token). Add 'jq -r .token t.json' to reveal it."
 
-      - name: 2. Resolve project UUIDs (c.demo, java.demo, perl.demo)
+      - name: 3. Resolve project UUIDs (c.demo, java.demo, perl.demo)
         run: |
           set +e
           echo "::add-mask::$T"
@@ -64,7 +85,7 @@ jobs:
             echo "${var}_UUID=$uuid" >> "$GITHUB_ENV"
           done
 
-      - name: 3. Associate project c.demo
+      - name: 4. Associate project c.demo
         run: |
           set +e
           echo "::add-mask::$T"
@@ -81,7 +102,7 @@ jobs:
             -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
           echo "-> HTTP $code"; head -c 200 l.json; echo
 
-      - name: 4. Associate project java.demo
+      - name: 5. Associate project java.demo
         run: |
           set +e
           echo "::add-mask::$T"
@@ -98,7 +119,7 @@ jobs:
             -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
           echo "-> HTTP $code"; head -c 200 l.json; echo
 
-      - name: 5. Update - also associate project perl.demo
+      - name: 6. Update - also associate project perl.demo
         run: |
           set +e
           echo "::add-mask::$T"
@@ -115,7 +136,7 @@ jobs:
             -H "Content-Type: application/json" -d "$body" "$A/authentication/token-resource-links")
           echo "-> HTTP $code"; head -c 200 l.json; echo
 
-      - name: 6. Verify token role assignments
+      - name: 7. Verify token role assignments
         run: |
           set +e
           echo "::add-mask::$T"
@@ -126,4 +147,4 @@ jobs:
           curl -s -H "Authorization: Bearer $T" "$URL" -o defs.json
           echo "=== our token ($TOKEN_ID) ==="
           jq -r --arg id "$TOKEN_ID" '(.tokenDefinitions // [])[] | select(.id==$id) | "name=\(.name) roles=\(.roleAssignments)"' defs.json 2>/dev/null || head -c 300 defs.json
-          echo "(project associations are the token-resource-links created in steps 3-5)"
+          echo "(project associations are the token-resource-links created in steps 4-6)"
