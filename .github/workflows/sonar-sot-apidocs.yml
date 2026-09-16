@@ -1,0 +1,30 @@
+name: Sonar SOT apidocs fetch
+on:
+  workflow_dispatch:
+jobs:
+  apidocs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find the OpenAPI spec + server base for the auth domain
+        run: |
+          set +e
+          PAGE="https://api-docs.sonarsource.com/sonarqube-cloud/default/public-externalauthentication-0-0"
+          curl -sS -L --max-time 40 -o page.html -w "page HTTP %{http_code}\n" "$PAGE"
+          echo "--- candidate spec URLs / server bases in the page ---"
+          grep -oE "https?://[a-zA-Z0-9./_-]+\.(json|yaml|yml)" page.html | sort -u | head
+          grep -oE "\"(specUrl|url)\"[^,}]*" page.html | sort -u | head
+          grep -oE "https://[a-zA-Z0-9.-]*sonar[a-zA-Z0-9./_-]*" page.html | sort -u | head -20
+          echo "--- try common spec locations ---"
+          for u in \
+            "https://api-docs.sonarsource.com/sonarqube-cloud/default/public-externalauthentication-0-0.json" \
+            "https://api-docs.sonarsource.com/sonarqube-cloud/public-externalauthentication-0-0.json" \
+            "https://api-docs.sonarsource.com/specs/sonarqube-cloud/public-externalauthentication-0-0.json" ; do
+            c=$(curl -s -o spec.json -w "%{http_code}" -L --max-time 30 "$u")
+            echo "$u -> $c"
+            if [ "$c" = "200" ]; then
+              echo "  servers:"; jq -r '.servers[]?.url' spec.json 2>/dev/null | head
+              echo "  token-definition paths:"; jq -r '.paths | keys[]' spec.json 2>/dev/null | grep -iE "token|resource-link|role" | head
+              cp spec.json found-spec.json
+              break
+            fi
+          done
