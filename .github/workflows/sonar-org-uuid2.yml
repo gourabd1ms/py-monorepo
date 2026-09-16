@@ -1,0 +1,25 @@
+name: Sonar org uuid probe 2
+on:
+  workflow_dispatch:
+jobs:
+  u:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      A: https://api.sonarqube.us
+    steps:
+      - name: Probe organizations/organizations for UUID (read-only)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          AUTH="Authorization: Bearer $T"
+          for u in \
+            "$A/organizations/organizations?organizationKey=gourabd1ms" \
+            "$A/organizations/organizations?organizationKey=gourabd1ms&pageSize=10" \
+            "$A/organizations/organizations" ; do
+            code=$(curl -s -o o.json -w "%{http_code}" -H "$AUTH" "$u")
+            echo "==== ${u#$A} -> $code"
+            head -c 700 o.json; echo
+            echo "-- uuid(s) found:"; grep -oE '"id":"[0-9a-fA-F-]{36}"' o.json | head
+            echo
+          done
