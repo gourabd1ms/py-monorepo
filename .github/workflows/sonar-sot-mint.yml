@@ -1,0 +1,31 @@
+name: Sonar SOT mint two tokens
+on:
+  workflow_dispatch:
+jobs:
+  mint:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      A: https://api.sonarqube.us
+      ORG_UUID: 705a240f-23f9-4524-86cf-f50f6ccac3a8
+    steps:
+      - name: Create two scoped org tokens (metadata only in logs)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          AUTH="Authorization: Bearer $T"
+          EP="$A/authentication/token-definitions"
+
+          BODY1='{"name":"proj-browse-admin-scan","organizationId":"'"$ORG_UUID"'","roleAssignments":[{"resourceType":"project","roles":["user","admin","scan"]}],"autoGrantProjectPermissions":false}'
+          echo "=== Token 1 (project-scoped: browse/administer/analysis) ==="
+          c1=$(curl -s -o t1.json -w "%{http_code}" -X POST -H "$AUTH" -H "Content-Type: application/json" -d "$BODY1" "$EP")
+          echo "HTTP $c1"
+          jq -r '"id=\(.id) name=\(.name) roles=\(.roleAssignments)"' t1.json 2>/dev/null || head -c 300 t1.json
+
+          BODY2='{"name":"org-admin-scan-provision","organizationId":"'"$ORG_UUID"'","roleAssignments":[{"resourceType":"organization","roles":["admin","scan","provisioning"]},{"resourceType":"project","roles":["user","admin","scan"]}],"autoGrantProjectPermissions":false}'
+          echo "=== Token 2 (org admin/analysis/provisioning + project browse/administer/analysis) ==="
+          c2=$(curl -s -o t2.json -w "%{http_code}" -X POST -H "$AUTH" -H "Content-Type: application/json" -d "$BODY2" "$EP")
+          echo "HTTP $c2"
+          jq -r '"id=\(.id) name=\(.name) roles=\(.roleAssignments)"' t2.json 2>/dev/null || head -c 300 t2.json
+
+          echo "NOTE: token values are in t1.json/t2.json (.token). Add your own echo to reveal, or upload as artifact."

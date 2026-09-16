@@ -1,0 +1,38 @@
+name: Sonar SOT attach token to projects
+on:
+  workflow_dispatch:
+    inputs:
+      token_id:
+        description: "The token UUID (id) returned by the mint workflow"
+        required: true
+      project_keys:
+        description: "Comma-separated project keys to attach"
+        default: "gourabd1ms_py-monorepo_service_a,gourabd1ms_py-monorepo_service_b"
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      A: https://api.sonarqube.us
+      ORG_UUID: 705a240f-23f9-4524-86cf-f50f6ccac3a8
+      TOKEN_ID: ${{ inputs.token_id }}
+      KEYS: ${{ inputs.project_keys }}
+    steps:
+      - name: Resolve project UUIDs and attach the token to each
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          AUTH="Authorization: Bearer $T"
+          echo "=== resolve project UUIDs for: $KEYS ==="
+          curl -s -H "$AUTH" "$A/projects/projects?organizationIds=$ORG_UUID&pageSize=500" -o all.json
+          echo "HTTP list: $(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH" "$A/projects/projects?organizationIds=$ORG_UUID&pageSize=500")"
+          IFS=',' read -ra KS <<< "$KEYS"
+          for k in "${KS[@]}"; do
+            uuid=$(jq -r --arg k "$k" '.projects[] | select(.key==$k) | .id' all.json 2>/dev/null | head -1)
+            if [ -z "$uuid" ]; then echo "  !! no UUID found for $k (skipping)"; continue; fi
+            echo "  attaching $k ($uuid)"
+            body='{"organizationTokenId":"'"$TOKEN_ID"'","resourceType":"project","resourceId":"'"$uuid"'"}'
+            code=$(curl -s -o link.json -w "%{http_code}" -X POST -H "$AUTH" -H "Content-Type: application/json" \
+              -d "$body" "$A/authentication/token-resource-links")
+            echo "    -> HTTP $code"; head -c 200 link.json; echo
+          done
