@@ -1,0 +1,26 @@
+name: Sonar SOT read-only explore
+on:
+  workflow_dispatch:
+jobs:
+  sot:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.SONAR_ADMIN }}
+      H: https://sonarqube.us
+    steps:
+      - name: GET token-definitions (read-only)
+        run: |
+          set +e
+          echo "::add-mask::$T"
+          BASE="$H/api/v2"
+          for u in \
+            "$BASE/authentication/token-definitions" \
+            "$BASE/authentication/token-resource-links" \
+            "$BASE/users/roles?principalType=organizationToken" ; do
+            code=$(curl -s -o r.json -w "%{http_code}" -H "Authorization: Bearer $T" "$u")
+            printf "GET %-60s -> %s\n" "${u#$H}" "$code"
+            case "$code" in 200|201|400|422) head -c 300 r.json | tr -d '\n'; echo;; esac
+          done
+          echo "=== org UUID from any token-definitions row ==="
+          curl -s -H "Authorization: Bearer $T" "$BASE/authentication/token-definitions" -o list.json
+          jq -r '(.tokenDefinitions // .items // .) | if type=="array" then .[] else . end | "name=\(.name) org=\(.organizationId) roles=\(.roleAssignments)"' list.json 2>/dev/null | head
